@@ -1,0 +1,21 @@
+{
+  "name": "TLA202x",
+  "version": "1.0.0",
+  "description": "Library created to use tla202x adc ic",
+  "keywords": "adc, tla, tla2024, i2c",
+  "repository":
+  {
+    "type": "git",
+    "url": "https://github.com/Dawid-Jarczok/TLA202x.git"
+  },
+  "authors":
+  [
+    {
+      "name": "Dawid Jarczok",
+      "maintainer": true
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "*"
+}
