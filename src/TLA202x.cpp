@@ -6,7 +6,6 @@ TLA202x::TLA202x(TwoWire *dev): wire(dev) {
 
 bool TLA202x::begin(uint8_t address) {
     this->addr = address;
-
     reset();
     delay(10);
 
@@ -18,11 +17,10 @@ bool TLA202x::begin(uint8_t address) {
 }
 
 uint16_t TLA202x::read(uint8_t mem_addr) {
-
     this->wire->beginTransmission(this->addr);
     this->wire->write(mem_addr);
     this->wire->endTransmission(false);
-//    delay(5);
+    //delay(5);
     this->wire->requestFrom(this->addr, (uint8_t)2);
     if (2 <= this->wire->available()) {
         // bring in data
@@ -36,12 +34,16 @@ uint16_t TLA202x::read(uint8_t mem_addr) {
     return 0;
 }
 
+void TLA202x::readCurrentConf() {
+    this->currentConf = this->read(this->confReg_);
+}
+
 int TLA202x::write(uint16_t out_data) {
     int written = 0;
     // save conf
     this->savedConf_ = out_data;
     // put our out_data into the I2C data union so we can send MSB and LSB
-    data.value = out_data;
+    this->data.value = out_data;
     this->wire->beginTransmission(this->addr);
     this->wire->write(this->confReg_);
     written += this->wire->write(this->data.packet[1]);
@@ -64,12 +66,11 @@ int16_t TLA202x::analogRead() {
     // this only needs to run when in single shot.
     if (this->currentMode_ == OP_SINGLE) {
         // write 1 to OS bit to start conv
-        uint16_t current_conf = this->read(this->confReg_);
-        current_conf |= 0x8000;
-        this->write(current_conf);
+        this->currentConf |= 0x8000;
+        this->write(this->currentConf);
         // OS bit will be 0 until conv is done.
         do {
-            delay(5);
+            delay(1);
         } while ((this->read(this->confReg_) & 0x8000) == 0);
     }
 
@@ -96,57 +97,62 @@ int16_t TLA202x::analogRead() {
     return ret;
 }
 
-int16_t TLA202x::analogRead(uint8_t channel) {
-    MultiplexerConfig muxCfg = (MultiplexerConfig)(channel - 4);
-    this->setMuxConfig(muxCfg);
+int16_t TLA202x::analogRead(FullScaleRange range) {
+    //Writes new settings immediately only if in continous mode.
+    //In single mode analogRead writes config.
+    this->setFullScaleRange(range, this->currentMode_ == OP_CONTINUOUS);
     return this->analogRead();
 }
 
-void TLA202x::setFullScaleRange(TLA202x::FullScaleRange range) {
-    this->currentFSR_val_ = range;
-
-    uint16_t conf = this->read(this->confReg_);
-
-    // clear the PGA bits:
-    conf &= ~0x0E00;
-
-    // shift
-    conf |= range << 9;
-    this->write(conf);
+int16_t TLA202x::analogRead(uint8_t channel) {
+    //Writes new settings immediately only if in continous mode.
+    //In single mode analogRead writes config.
+    MultiplexerConfig muxCfg = (MultiplexerConfig)(channel - 4);
+    this->setMuxConfig(muxCfg, this->currentMode_ == OP_CONTINUOUS);
+    return this->analogRead();
 }
 
-void TLA202x::setMuxConfig(MultiplexerConfig option) {
+int16_t TLA202x::analogRead(uint8_t channel, FullScaleRange range) {
+    //Writes new settings immediately only if in continous mode.
+    //In single mode analogRead writes config.
+    this->setFullScaleRange(range, false);
+    MultiplexerConfig muxCfg = (MultiplexerConfig)(channel - 4);
+    this->setMuxConfig(muxCfg, this->currentMode_ == OP_CONTINUOUS);
+    return this->analogRead();
+}
+
+void TLA202x::setFullScaleRange(TLA202x::FullScaleRange range, bool write) {
+    if (this->currentFSR_val_ == range) return;
+    this->currentFSR_val_ = range;
+    // clear the PGA bits:
+    this->currentConf &= ~0x0E00;
+    this->currentConf |= range << 9;
+    if (write) this->write(this->currentConf);
+}
+
+void TLA202x::setMuxConfig(MultiplexerConfig option, bool write) {
     if (this->muxConfig == option) return;
     this->muxConfig = option;
-    uint16_t conf = this->read(this->confReg_);
     // clear MUX bits
-    conf &= ~0x7000;
-
-    // shift
-    conf |= this->muxConfig << 12;
-    this->write(conf);
+    this->currentConf &= ~0x7000;
+    this->currentConf |= this->muxConfig << 12;
+    if (write) this->write(this->currentConf);
 }
 
-void TLA202x::setOperatingMode(OperatingMode mode) {
+void TLA202x::setOperatingMode(OperatingMode mode, bool write) {
     this->currentMode_ = mode;
-    uint16_t conf = this->read(this->confReg_);
 
     // clear MODE bit (8) (continous conv)
-    conf &= ~(1 << 8);
-    if (mode == OP_SINGLE) {
-        // single shot
-        conf |= (1 << 8);
-    }
-    this->write(conf);
+    this->currentConf &= ~(1 << 8);
+    if (mode == OP_SINGLE) this->currentConf |= (1 << 8);
+    if (write) this->write(this->currentConf);
 }
 
-void TLA202x::setDataRate(DataRate rate) {
-    uint16_t conf = this->read(this->confReg_);
-
+void TLA202x::setDataRate(DataRate rate, bool write) {
     // set bits 7:5
     //conf |= 0b111 << 5;
-    conf |= rate << 5;
-    write(conf);
+    this->currentConf |= rate << 5;
+    if (write) this->write(this->currentConf);
 }
 
 float TLA202x::getCurrentFullRangeVoltage() {
@@ -161,12 +167,13 @@ float TLA202x::getCurrentFullRangeVoltage() {
 }
 
 float TLA202x::voltageRead(uint8_t channel) {
+    if (channel > 3) return 0.0f;
     int16_t val = this->analogRead(channel);
 
     float fsrV = this->getCurrentFullRangeVoltage() - this->getVoltageResolution();
 
     //return (val - 0) * fsrV / (2047l - 0);
-    return (float)val * fsrV / 2047.0f;
+    return (float)val * fsrV / 2047.0f; //map
 
     //long converted = map((long)val, -2048, 2047, 0, fsrV * 100000);
     //long converted = map((long)val, 0l, 2047l, 0l, fsrV * 100000);
@@ -183,6 +190,27 @@ float TLA202x::getVoltageResolution() {
         case TLA202x::FullScaleRange::FSR_0_256V: return 0.000125;
     }
     return 0.0;
+}
+
+float TLA202x::voltageReadAutoRange(uint8_t channel) {
+    if (channel > 3) return 0.0f;
+    int16_t val = 0;
+    do {
+        val = this->analogRead(channel, (FullScaleRange)this->autoRangeFSR[channel]);
+
+        // Below calculation dont match going in or from fsr = 6.144V
+        // 1023 * 0.9 = 921, in lower fsr value should be less than 1842
+        if (val <= 921 && this->autoRangeFSR[channel] < TLA202x::FullScaleRange::FSR_0_256V){
+             this->autoRangeFSR[channel] += 1;
+        }
+        // 2047 * 0.9 = 1842, in higher fsr value should be more than 921
+        else if (val >= 1842 && this->autoRangeFSR[channel] > TLA202x::FullScaleRange::FSR_6_144V) {
+            this->autoRangeFSR[channel] -= 1;
+        }
+    // Repeat analogRead if we exceeded scale
+    } while (val == 2047 && this->autoRangeFSR[channel] != TLA202x::FullScaleRange::FSR_6_144V);
+    float fsrV = this->getCurrentFullRangeVoltage() - this->getVoltageResolution();
+    return (float)val * fsrV / 2047.0f; //map
 }
 
 
