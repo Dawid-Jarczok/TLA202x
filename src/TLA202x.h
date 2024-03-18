@@ -46,9 +46,7 @@ public:
     /*
       Initializes I2C bus
       @param address adc address, default 0x48
-      @returns
-         true - adc responds with correct default conf,
-         false - otherwise
+      @returns true - adc responds with correct default conf
     */
     bool begin(uint8_t address = 0x48);
 
@@ -140,20 +138,14 @@ private:
 
     TwoWire *wire = NULL;
     uint8_t addr = 0x48;
-    uint8_t convReg_ = 0x00;
-    uint8_t confReg_ = 0x01;
+    const uint8_t convReg_ = 0x00;
+    const uint8_t confReg_ = 0x01;
 
     uint16_t initConf_ = 0x8583;
-    uint16_t savedConf_ = 0x8583;
-    uint16_t currentConf = savedConf_;
+    uint16_t currentConf = 0x8583;
     OperatingMode currentMode_ = OP_SINGLE;
     FullScaleRange currentFSR_val_ = FSR_2_048V;
     MultiplexerConfig muxConfig;
-
-    union I2C_data {
-        uint8_t packet[2];
-        uint16_t value;
-    } data;
 
     uint8_t autoRangeFSR[4] = {FSR_2_048V, FSR_2_048V, FSR_2_048V, FSR_2_048V};
 

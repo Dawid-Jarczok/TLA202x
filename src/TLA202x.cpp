@@ -23,11 +23,8 @@ uint16_t TLA202x::read(uint8_t mem_addr) {
     //delay(5);
     this->wire->requestFrom(this->addr, (uint8_t)2);
     if (2 <= this->wire->available()) {
-        // bring in data
-        this->data.packet[1] = this->wire->read();
-        this->data.packet[0] = this->wire->read();
-        uint16_t ret = this->data.value;
-        this->data.value = 0;
+        uint16_t ret = (uint16_t)this->wire->read() << 8;
+        ret += this->wire->read();
         return ret;
     }
 
@@ -38,18 +35,13 @@ void TLA202x::readCurrentConf() {
     this->currentConf = this->read(this->confReg_);
 }
 
-int TLA202x::write(uint16_t out_data) {
+int TLA202x::write(uint16_t data) {
     int written = 0;
-    // save conf
-    this->savedConf_ = out_data;
-    // put our out_data into the I2C data union so we can send MSB and LSB
-    this->data.value = out_data;
     this->wire->beginTransmission(this->addr);
     this->wire->write(this->confReg_);
-    written += this->wire->write(this->data.packet[1]);
-    written += this->wire->write(this->data.packet[0]);
+    written += this->wire->write((uint8_t)(data >> 8));
+    written += this->wire->write((uint8_t)(data & 0xFF));
     this->wire->endTransmission();
-    this->data.value = 0;
     return written;
 }
 
@@ -58,7 +50,7 @@ void TLA202x::reset() {
 }
 
 void TLA202x::restore() {
-    uint16_t restore_conf = this->savedConf_ & ~0x8000;
+    uint16_t restore_conf = this->currentConf & ~0x8000;
     this->write(restore_conf);
 }
 
@@ -149,8 +141,6 @@ void TLA202x::setOperatingMode(OperatingMode mode, bool write) {
 }
 
 void TLA202x::setDataRate(DataRate rate, bool write) {
-    // set bits 7:5
-    //conf |= 0b111 << 5;
     this->currentConf |= rate << 5;
     if (write) this->write(this->currentConf);
 }
@@ -182,14 +172,14 @@ float TLA202x::voltageRead(uint8_t channel) {
 
 float TLA202x::getVoltageResolution() {
     switch (this->currentFSR_val_) {
-        case TLA202x::FullScaleRange::FSR_6_144V: return 0.003;
-        case TLA202x::FullScaleRange::FSR_4_096V: return 0.002;
-        case TLA202x::FullScaleRange::FSR_2_048V: return 0.001;
-        case TLA202x::FullScaleRange::FSR_1_024V: return 0.0005;
-        case TLA202x::FullScaleRange::FSR_0_512V: return 0.00025;
-        case TLA202x::FullScaleRange::FSR_0_256V: return 0.000125;
+        case TLA202x::FullScaleRange::FSR_6_144V: return 0.003f;
+        case TLA202x::FullScaleRange::FSR_4_096V: return 0.002f;
+        case TLA202x::FullScaleRange::FSR_2_048V: return 0.001f;
+        case TLA202x::FullScaleRange::FSR_1_024V: return 0.0005f;
+        case TLA202x::FullScaleRange::FSR_0_512V: return 0.00025f;
+        case TLA202x::FullScaleRange::FSR_0_256V: return 0.000125f;
     }
-    return 0.0;
+    return 0.0f;
 }
 
 float TLA202x::voltageReadAutoRange(uint8_t channel) {
@@ -198,7 +188,7 @@ float TLA202x::voltageReadAutoRange(uint8_t channel) {
     do {
         val = this->analogRead(channel, (FullScaleRange)this->autoRangeFSR[channel]);
 
-        // Below calculation dont match going in or from fsr = 6.144V
+        // Below calculation dont match going in or from fsr = 6.144V ;)
         // 1023 * 0.9 = 921, in lower fsr value should be less than 1842
         if (val <= 921 && this->autoRangeFSR[channel] < TLA202x::FullScaleRange::FSR_0_256V){
              this->autoRangeFSR[channel] += 1;
